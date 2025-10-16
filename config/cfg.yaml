@@ -1,0 +1,21 @@
+# Verbosité
+log_level: INFO
+# encodage des caractères
+car_code: utf-8
+# langae
+language: en
+# pdf rules file
+rules_en_file: Bolt_Action_3rd_Ed_en.pdf
+rules_fr_file: Bolt_Action_3rd_Ed_fr.pdf
+# modèle LLM à utiliser avec RAG
+embeddings_fr_model_name: paraphrase-multilingual-MiniLM-L12-v2
+embeddings_en_model_name: all-MiniLM-L6-v2
+llm_fr_model_name: mistral
+llm_en_model_name: tinyllama
+# llm_en_model_name:  llama3.2
+llm_temperature: 0.1
+
+pdf_reader: pypdf
+
+# output file (empty if none or should be computed by script)
+output_file:

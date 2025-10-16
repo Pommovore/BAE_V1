@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "ba-expert"
+version = "0.1.0"
+description = ""
+authors = ["Jacques Chodorowski <jacques.chodorowski@orange.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.12,<3.15"
+pypdf = "^6.1.0"
+langchain = "^0.3.27"
+langchain-community = "^0.3.30"
+sentence-transformers = "^5.1.1"
+faiss-cpu = "^1.12.0"
+langchain-huggingface = "^0.3.1"
+deep-translator = "^1.11.4"
+hf-xet = "^1.1.10"
+langchain-ollama = "^0.3.8"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
