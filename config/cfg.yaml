@@ -15,7 +15,8 @@ llm_en_model_name: tinyllama
 # llm_en_model_name:  llama3.2
 llm_temperature: 0.1
 
-pdf_reader: pypdf
+# options : pypdf, unstructured
+pdf_reader: unstructured
 
 # output file (empty if none or should be computed by script)
 output_file:

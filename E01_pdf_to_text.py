@@ -6,10 +6,112 @@ import os  # Utilisé pour vérifier si le fichier existe
 import sys
 import time  # Juste pour l'exemple, pour voir la mise à jour
 import getopt
-import pypdf
 import re
+# PDF loaders
+import pypdf
+from langchain_community.document_loaders import UnstructuredPDFLoader
 
 from config import load_config, bcolors, logger
+
+# =============================================================================
+# format_text_to_markdown
+# =============================================================================
+def format_text_to_markdown(raw_text: str) -> str:
+    """
+    Nettoie le texte PDF, supprime le bruit et applique un formatage Markdown
+    pour améliorer la structure pour les applications RAG.
+    """
+
+    # 1. NETTOYAGE PRÉLIMINAIRE ET SUPPRESSION DU BRUIT CONNU
+
+    # Suppression des identifiants de source (spécifiques à votre input)
+    text = re.sub(r'\+\]', '', raw_text)
+
+    bruit_patterns = [
+        # Motifs de pied/en-tête de page liés à la mise en page
+        r'BOLT 3rd Edition Layouts Correx\.indd \d+\s*BOLT 3rd Edition Layouts Correx\.indd \d+',
+        r'\d{2}/\d{2}/\d{4} \d{2}:\d{2}( \d{2}/\d{2}/\d{4} \d{2}:\d{2})?',
+        r'\n\s*Bolt Action V3\s*\n',
+        r'\n\s*\d{1,3}\s*Bolt Action V3\s*\n',
+        r'\n\s*44mm if 2 lines\s*\n',
+
+        # Numéros de page isolés ou en marge
+        r'^\s*\d{1,3}\s*$',
+        r'\n\s*\d{1,3}\s*$',  # Numéro de page en fin de ligne après le nettoyage initial
+    ]
+
+    for pattern in bruit_patterns:
+        text = re.sub(pattern, '\n', text, flags=re.MULTILINE | re.IGNORECASE)
+
+    # 2. RECONSTRUCTION DE LA STRUCTURE EN MARKDOWN (Titres)
+
+    lines = text.split('\n')
+    markdown_lines = []
+
+    # Titres majeurs (Chapitres, Sections principales)
+    major_titles = [
+        "INTRODUCTION", "CONTENTS", "WARGAMES AND HISTORY", "BASIC SUPPLIES",
+        "CONVENTIONS OF WAR", "UNITS", "THE TURN", "ORDERS", "MOVEMENT",
+        "SHOOTING", "WEAPONS", "CLOSE QUARTERS", "HEADQUARTERS", "ARTILLERY",
+        "VEHICLES", "BUILDINGS", "ARRANGING A GAME OF BOLT ACTION", "FORCE SELECTION",
+        "ARMY LISTS", "OPTIONAL RULES", "COMMON TRANSPORT VEHICLES", "RULES SUMMARY",
+        "CREDITS", "INDEX",
+    ]
+
+    # Titres des Listes d'Armées
+    army_list_titles = [
+        "GERMANY", "UNITED STATES", "GREAT BRITAIN", "SOVIET UNION",
+        "IMPERIAL JAPAN",
+    ]
+
+    # Détection et conversion des lignes en titres Markdown
+    for line in lines:
+        stripped_line = line.strip()
+
+        if not stripped_line:
+            markdown_lines.append(line)
+            continue
+
+        # Titres de Niveau 1 ou 2 (Gros blocs)
+        if stripped_line in major_titles:
+            markdown_lines.append(f'\n## {stripped_line}\n')
+        elif stripped_line in army_list_titles:
+            markdown_lines.append(f'\n## ARMIES OF {stripped_line}\n')
+
+        # Titres de Niveau 3 (Sous-sections, souvent Capitales au début de l'extrait)
+        # Ex: FALL WEISS – THE INVASION OF POLAND, SEPTEMBER 1939
+        elif stripped_line.isupper() and len(stripped_line) < 70 and not stripped_line.isdigit():
+            # Vérifie si la ligne contient plus de 3 mots, sinon c'est potentiellement un bruit ou un titre très court
+            if len(stripped_line.split()) > 3:
+                markdown_lines.append(f'\n### {stripped_line}\n')
+            else:
+                # Si le titre est court et n'est pas un titre principal, le laisser en texte normal pour l'instant
+                markdown_lines.append(line)
+
+        # Lignes normales
+        else:
+            markdown_lines.append(line)
+
+    text = '\n'.join(markdown_lines)
+
+    # 3. NETTOYAGE FINAL (Espacement et cohérence)
+
+    # Remplacement des sauts de ligne multiples (après application des titres)
+    text = re.sub(r'\n{2,}', '\n\n', text).strip()
+
+    # Remplacement des espaces multiples par un seul
+    text = re.sub(r'[ \t]+', ' ', text)
+
+    # Remplacement des espaces multiples autour des titres (s'assure qu'ils sont bien centrés/isolés)
+    text = re.sub(r'\n\s*## ', '\n## ', text)
+    text = re.sub(r' ##\s*\n', ' ##\n', text)
+    text = re.sub(r'\n\s*### ', '\n### ', text)
+    text = re.sub(r' ###\s*\n', ' ###\n', text)
+
+    # Nettoyage des lignes vides inutiles
+    text = re.sub(r'\n\n\n+', '\n\n', text)
+
+    return text
 
 
 # =============================================================================
@@ -96,7 +198,7 @@ def nettoyage_raw_text(input_raw_txt_file, output_clean_txt_file=None):
 
 
 # =============================================================================
-# nettoyage_pypdf
+# extraction_pypdf
 # =============================================================================
 def extraction_pypdf(pdf_file_path, output_raw_txt_file, output_clean_txt_file):
     try:
@@ -137,6 +239,61 @@ def extraction_pypdf(pdf_file_path, output_raw_txt_file, output_clean_txt_file):
     # nettoyage du texte brut
     nettoyage_raw_text(output_raw_txt_file, output_clean_txt_file)
 
+
+# =============================================================================
+# extraction_unstructured
+# =============================================================================
+def extraction_unstructured(pdf_file_path, output_raw_txt_file, output_clean_txt_file):
+
+        # --- 1. Initialiser le Loader ---
+    # Nous utilisons le mode par défaut (partitioning) pour une extraction de texte structurée.
+    # 'strategy="auto"' permet à Unstructured de choisir la meilleure méthode (rapide ou plus détaillée)
+    loader = UnstructuredPDFLoader(
+        file_path=pdf_file_path,
+        mode="paged"  # Optionnel : traite le document page par page
+    )
+
+    # --- 2. Charger et Extraire les Documents ---
+    # La méthode .load() exécute l'extraction et retourne une liste d'objets 'Document'.
+    # Chaque objet Document contient le texte extrait (page_content) et des metadata.
+    try:
+        print(f"Chargement du fichier '{bcolors.INPUT}{pdf_file_path}{bcolors.ENDC}' ...")
+        documents = loader.load()
+    except FileNotFoundError:
+        print(f"Erreur : Le fichier {pdf_file_path} n'a pas été trouvé.")
+        documents = []
+
+    # --- 3. Combiner le Texte Brut ---
+    # Pour obtenir le texte brut complet du PDF, nous concaténons le contenu de toutes les pages/documents.
+    full_text = ""
+    if documents:
+        nr_doc = 0
+        for doc in documents:
+            # Ajoute le contenu de la page/chunk, suivi d'une double ligne pour la séparation
+            full_text += doc.page_content + "\n\n"
+            # Affiche la progression
+            nr_doc = nr_doc + 1
+            print(f"\r  - Extraction en cours... Doc {nr_doc}/{len(documents)}", end="")
+        print("✅ Texte extrait avec succès (aperçu) :")
+        print("-" * 30)
+        print(full_text[:100] + "...")  # Affiche les 1500 premiers caractères
+        print("-" * 30)
+        print(f"Nombre total de caractères extraits : {len(full_text)}")
+
+    else:
+        print("❌ Aucun contenu n'a pu être chargé.")
+    #
+    # sauvegarde du texte brut
+    with open(output_raw_txt_file, 'w', encoding='utf-8') as output_file:
+        output_file.write(full_text)
+    #
+    # nettoyage du texte brut
+    # nettoyage_raw_text(output_raw_txt_file, output_clean_txt_file)
+    with open(output_raw_txt_file, 'r', encoding='utf-8') as f:
+        raw_texte = f.read()
+    clean_texte = format_text_to_markdown(raw_texte)
+    with open(output_clean_txt_file, 'w', encoding='utf-8') as output_file:
+        output_file.write(clean_texte)
 
 # =============================================================================
 # usage
@@ -209,3 +366,5 @@ if __name__ == '__main__':
         print(f"Lancement du nettoyage final du fichier {bcolors.INPUT}'{i_pdf_file}'{bcolors.ENDC}...")
         if app_config['pdf_reader'] == 'pypdf':
             extraction_pypdf(i_pdf_file, o_raw_txt_file, o_clean_txt_file)
+        elif app_config['pdf_reader'] == 'unstructured':
+            extraction_unstructured(i_pdf_file, o_raw_txt_file, o_clean_txt_file)
